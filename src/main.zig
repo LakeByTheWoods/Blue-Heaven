@@ -157,18 +157,16 @@ pub fn main() anyerror!void {
     {
         const glx_extensions = glXQueryExtensionsString(display, default_screen);
         assert(glx_extensions != null);
-        const query_buffer : []const GLubyte = "glXCreateContextAttribsARB";
-        const query = &query_buffer[0];
         const glXCreateContextAttribsARBProc = fn(?*Display, GLXFBConfig, GLXContext, c_int, [*c]const GLint) callconv(.C) GLXContext;
-        const glXCreateContextAttribsARB = @ptrCast(glXCreateContextAttribsARBProc, glXGetProcAddressARB(@ptrCast([*c] const u8, query))); // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+        const glXCreateContextAttribsARB = @ptrCast(glXCreateContextAttribsARBProc, glXGetProcAddressARB(@ptrCast([*c] const u8, &"glXCreateContextAttribsARB"[0]))); // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
         _ = c.printf("%s\n", glx_extensions);
         const extension_found = isExtensionSupported(@ptrCast([*:0]const u8, glx_extensions),  "GLX_ARB_create_context");
         assert(extension_found);
 
         const context_attributes = [_:None]GLint {
-            GLX_CONTEXT_MAJOR_VERSION_ARB, 2,
-            GLX_CONTEXT_MINOR_VERSION_ARB, 1,
-            //GLX_CONTEXT_PR3FILE_MASK_ARB,
+            GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+            GLX_CONTEXT_MINOR_VERSION_ARB, 3,
+            //GLX_CONTEXT_PROFILE_MASK_ARB,
             //GLX_CONTEXT_FLAGS_ARB,
             //GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
             None,
@@ -179,7 +177,69 @@ pub fn main() anyerror!void {
         std.debug.warn("Created GLX context\n", .{});
 
         _ = glXMakeCurrent(display.?, window, glx_context);
+
+        // enable VSync if available
+        if (isExtensionSupported(glx_extensions, "GLX_MESA_swap_control")) {
+            std.debug.warn("MESA_swap_control is supported\n", .{});
+            const glXSwapIntervalMESA = @ptrCast(PFNGLXSWAPINTERVALMESAPROC, glXGetProcAddressARB(@ptrCast([*c] const u8, &"glXSwapIntervalMESA"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+            _ = glXSwapIntervalMESA(1);
+        } else if (isExtensionSupported(glx_extensions, "GLX_SGI_swap_control")) {
+            std.debug.warn("SGI_swap_control is supported\n", .{});
+            const glXSwapIntervalSGI = @ptrCast(PFNGLXSWAPINTERVALSGIPROC, glXGetProcAddressARB(@ptrCast([*c] const u8, &"glXSwapIntervalSGI"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+            _ = glXSwapIntervalSGI(1);
+        } else if (isExtensionSupported(glx_extensions, "GLX_EXT_swap_control")) {
+            std.debug.warn("EXT_swap_control is supported\n", .{});
+            const glXSwapIntervalEXT = @ptrCast(PFNGLXSWAPINTERVALEXTPROC, glXGetProcAddressARB(@ptrCast([*c] const u8, &"glXSwapIntervalEXT"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+            _ = glXSwapIntervalEXT(display.?, window, 1);
+        } else {
+            std.debug.warn("VSync not supported\n", .{});
+        }
+
+        _ = XSync(display.?, 0);
     }
+    {
+        const opengl_version                  = glGetString(GL_VERSION);
+        const opengl_vendor                   = glGetString(GL_VENDOR);
+        const opengl_renderer                 = glGetString(GL_RENDERER);
+        const opengl_shading_language_version = glGetString(GL_SHADING_LANGUAGE_VERSION);
+        _ = c.printf("opengl version = %s\n", opengl_version);
+        _ = c.printf("opengl vendor = %s\n", opengl_vendor);
+        _ = c.printf("opengl renderer = %s\n", opengl_renderer);
+        _ = c.printf("opengl shading language version = %s\n", opengl_shading_language_version);
+    }
+
+    //// Buffers
+    //PFNGLGENBUFFERSPROC glGenBuffers;
+    //PFNGLBINDBUFFERPROC glBindBuffer;
+    //PFNGLBUFFERDATAPROC glBufferData;
+
+    //// Vertex Arrays and Attributes
+    //PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
+    //PFNGLGENVERTEXARRAYSPROC glGenVertexArrays;
+    //PFNGLBINDVERTEXARRAYPROC glBindVertexArray;
+    //PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
+    //PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray;
+
+    //PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
+    //PFNGLUNIFORM2FPROC  glUniform2f;
+    //PFNGLUNIFORM4FPROC  glUniform4f;
+    //PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
+
+    //PFNGLCREATESHADERPROC glCreateShader;
+    //PFNGLATTACHSHADERPROC glAttachShader;
+    //PFNGLDETACHSHADERPROC glDetachShader;
+    //PFNGLDELETESHADERPROC glDeleteShader;
+    //PFNGLSHADERSOURCEPROC glShaderSource;
+    //PFNGLCOMPILESHADERPROC glCompileShader;
+    //PFNGLGETSHADERIVPROC glGetShaderiv;
+    //PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog;
+
+    //PFNGLCREATEPROGRAMPROC glCreateProgram;
+    //PFNGLLINKPROGRAMPROC glLinkProgram;
+    //PFNGLGETPROGRAMIVPROC glGetProgramiv;
+    //PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
+    //PFNGLUSEPROGRAMPROC glUseProgram;
+
     while (true){}
 }
 

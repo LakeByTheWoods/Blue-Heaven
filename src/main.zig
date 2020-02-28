@@ -1,4 +1,5 @@
 const std = @import("std");
+const ascii = @import("std").ascii;
 const assert = @import("std").debug.assert;
 
 pub usingnamespace @cImport({
@@ -6,6 +7,11 @@ pub usingnamespace @cImport({
     @cInclude("GL/gl.h");
     @cInclude("GL/glx.h");
     @cInclude("GL/glext.h");
+});
+
+const c = @cImport({
+    @cInclude("stdio.h");
+    @cInclude("string.h");
 });
 
 fn xErrorHandler (display : ?*Display, event : [*c]XErrorEvent) callconv(.C) c_int {
@@ -20,11 +26,33 @@ fn opaquePtrCast(comptime To : type, from : var) To {
     return @ptrCast(To, @alignCast(@alignOf(To.Child), from));
 }
 
-pub fn main() anyerror!void {
-    _ = XSetErrorHandler(xErrorHandler);
+fn isExtensionSupported(glx_extensions : [*:0]const u8, extension : []const u8) bool {
+    assert(extension.len != 0);
 
+    const space = ascii.indexOfIgnoreCase(extension, " ");
+    assert(space == null); // Extention string should not contain spaces
+
+    const extensions_len = c.strlen(glx_extensions);
+
+    var index : usize = 0;
+    while (ascii.indexOfIgnoreCase(glx_extensions[index..extensions_len], extension)) |where| {
+        const terminator = where + extension.len;
+        if (where == index or glx_extensions[where - 1] == ' ') {
+            if (terminator == extensions_len or glx_extensions[terminator] == ' ') {
+                std.debug.warn("Found GLX Extension: {}\n", .{extension});
+                return true;
+            }
+        }
+        index = terminator;
+    }
+    return false;
+}
+
+pub fn main() anyerror!void {
     const display : ?*Display = XOpenDisplay(0);
     defer { _ = XSync(display, 0); _ = XCloseDisplay(display);}
+    _ = XSetErrorHandler(xErrorHandler);
+
     const visual_attributes = [_]GLint{
         GLX_X_RENDERABLE, True,
         GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
@@ -52,9 +80,9 @@ pub fn main() anyerror!void {
         std.debug.warn("GLX Version minor = {}\n", .{glx_minor});
     }
 
+    var default_screen = DefaultScreen(display.?);
     const fb_config : GLXFBConfig = blk: {
         var fbcount : c_int = undefined;
-        var default_screen = DefaultScreen(display.?);
         var fbc : [*c]GLXFBConfig = glXChooseFBConfig(display, default_screen, &visual_attributes[0], &fbcount);
         defer _ = XFree(fbc);
         assert(fbc != null);
@@ -123,5 +151,35 @@ pub fn main() anyerror!void {
 
     _ = XStoreName(display, window, "Blue Heaven");
     _ = XMapWindow(display, window);
+
+    std.debug.warn("Creating GL context\n", .{});
+    var vsync_enabled = true;
+    {
+        const glx_extensions = glXQueryExtensionsString(display, default_screen);
+        assert(glx_extensions != null);
+        const query_buffer : []const GLubyte = "glXCreateContextAttribsARB";
+        const query = &query_buffer[0];
+        const glXCreateContextAttribsARBProc = fn(?*Display, GLXFBConfig, GLXContext, c_int, [*c]const GLint) callconv(.C) GLXContext;
+        const glXCreateContextAttribsARB = @ptrCast(glXCreateContextAttribsARBProc, glXGetProcAddressARB(@ptrCast([*c] const u8, query))); // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+        _ = c.printf("%s\n", glx_extensions);
+        const extension_found = isExtensionSupported(@ptrCast([*:0]const u8, glx_extensions),  "GLX_ARB_create_context");
+        assert(extension_found);
+
+        const context_attributes = [_:None]GLint {
+            GLX_CONTEXT_MAJOR_VERSION_ARB, 2,
+            GLX_CONTEXT_MINOR_VERSION_ARB, 1,
+            //GLX_CONTEXT_PR3FILE_MASK_ARB,
+            //GLX_CONTEXT_FLAGS_ARB,
+            //GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
+            None,
+        };
+        const glx_context = glXCreateContextAttribsARB(display.?, fb_config, @intToPtr(GLXContext, 0), True, &context_attributes[0]);
+        std.debug.warn("GLXContext: {}\n", .{glx_context});
+        assert(glx_context != null); // GLX context creation failed
+        std.debug.warn("Created GLX context\n", .{});
+
+        _ = glXMakeCurrent(display.?, window, glx_context);
+    }
+    while (true){}
 }
 

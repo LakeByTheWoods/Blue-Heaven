@@ -155,6 +155,52 @@ fn _renderer_build_one_off_program(shader_string_vertex: [:0]const u8, shader_st
     return program;
 }
 
+const Color3f = struct {
+    r: f32 = 0.0,
+    g: f32 = 0.0,
+    b: f32 = 0.0,
+};
+
+const Vector2f = struct {
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+};
+
+const Vector3f = struct {
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+    z: f32 = 0.0,
+};
+
+const Rectf = struct {
+    tl: Vector2f,
+    br: Vector2f,
+
+    pub fn width(self: *Rectf) f32 {
+        return (self.br.x - self.tl.x);
+    }
+
+    pub fn height(self: *Rectf) f32 {
+        return (self.br.y - self.tl.y);
+    }
+};
+
+var _program_rect: GLuint = undefined;
+var _program_rect_uniform_location_rect: GLint = undefined;
+var _program_rect_uniform_location_rect_color: GLint = undefined;
+var _program_rect_uniform_location_screen_size: GLint = undefined;
+
+const Renderer = struct {
+    display_rect: Rectf,
+    fn draw_rect(renderer: *Renderer, color: Color3f, rect: Rectf) void {
+        glUseProgram.?(_program_rect);
+        glUniform4f.?(_program_rect_uniform_location_rect, rect.tl.x, rect.tl.y, rect.br.x, rect.br.y);
+        glUniform4f.?(_program_rect_uniform_location_rect_color, color.r, color.g, color.b, 1.0);
+        glUniform2f.?(_program_rect_uniform_location_screen_size, renderer.display_rect.width(), renderer.display_rect.height());
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+};
+
 pub fn main() anyerror!void {
     const display: *Display = XOpenDisplay(0).?;
     defer {
@@ -381,16 +427,34 @@ pub fn main() anyerror!void {
         \\
     ;
 
-    const _program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
-    const _program_rect_uniform_location_rect = glGetUniformLocation.?(_program_rect, "rect");
-    const _program_rect_uniform_location_rect_color = glGetUniformLocation.?(_program_rect, "rect_color");
-    const _program_rect_uniform_location_screen_size = glGetUniformLocation.?(_program_rect, "screen_size");
+    const vertex_buffer_data = [_]GLfloat{
+        -1.0, -1.0, 0.0,
+        1.0,  -1.0, 0.0,
+        1.0,  1.0,  0.0,
+        -1.0, 1.0,  0.0,
+    };
+    {
+        var test_vao: GLuint = undefined;
+        var test_vbuffer: GLuint = undefined;
+
+        glGenVertexArrays.?(1, &test_vao);
+        glBindVertexArray.?(test_vao);
+
+        glGenBuffers.?(1, &test_vbuffer);
+        glBindBuffer.?(GL_ARRAY_BUFFER, test_vbuffer);
+        glBufferData.?(GL_ARRAY_BUFFER, vertex_buffer_data.len * @sizeOf(@TypeOf(vertex_buffer_data[0])), &vertex_buffer_data[0], GL_STATIC_DRAW);
+    }
+
+    _program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
+    _program_rect_uniform_location_rect = glGetUniformLocation.?(_program_rect, "rect");
+    _program_rect_uniform_location_rect_color = glGetUniformLocation.?(_program_rect, "rect_color");
+    _program_rect_uniform_location_screen_size = glGetUniformLocation.?(_program_rect, "screen_size");
 
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
+    //glEnable(GL_CULL_FACE);
     glEnable(GL_MULTISAMPLE);
 
-    glCullFace(GL_BACK);
+    //glCullFace(GL_BACK);
     glDepthFunc(GL_LEQUAL);
 
     var xres: c_int = 0;
@@ -409,6 +473,13 @@ pub fn main() anyerror!void {
     var game_start_timespec: timespec = undefined;
     assert(clock_gettime(mono_clock, &game_start_timespec) == 0);
     var frame_start_time = timespecToNanosec(&game_start_timespec);
+
+    var renderer = Renderer{
+        .display_rect = Rectf{
+            .tl = Vector2f{ .x = 0.0, .y = 0.0 },
+            .br = Vector2f{ .x = @intToFloat(f32, display_width), .y = @intToFloat(f32, display_height) },
+        },
+    };
 
     game_loop: while (true) {
         var display_size_changed = false;
@@ -441,12 +512,20 @@ pub fn main() anyerror!void {
         }
 
         if (should_quit) break :game_loop;
-        if (display_size_changed) glViewport(0, 0, display_width, display_height);
+        if (display_size_changed) {
+            glViewport(0, 0, display_width, display_height);
+            renderer.display_rect = Rectf{
+                .tl = Vector2f{ .x = 0.0, .y = 0.0 },
+                .br = Vector2f{ .x = @intToFloat(f32, display_width), .y = @intToFloat(f32, display_height) },
+            };
+        }
 
         {
             // Render
             glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            renderer.draw_rect(Color3f{ .r = 1.0, .g = 1.0, .b = 1.0 }, Rectf{ .tl = Vector2f{ .x = 100, .y = 100 }, .br = Vector2f{ .x = 400, .y = 500 } });
         }
 
         // FIXME: only swap if double buffering is enabled?

@@ -3,17 +3,30 @@ const ascii = @import("std").ascii;
 const assert = @import("std").debug.assert;
 
 usingnamespace @cImport({
+    @cInclude("stdio.h");
+    @cInclude("string.h");
+    @cInclude("unistd.h");
+    @cInclude("time.h");
+    @cInclude("errno.h");
+
     @cInclude("X11/Xlib.h");
     @cInclude("GL/gl.h");
     @cInclude("GL/glx.h");
     @cInclude("GL/glext.h");
 });
 
-const c = @cImport({
-    @cInclude("stdio.h");
-    @cInclude("string.h");
-    @cInclude("unistd.h");
-});
+fn timespecToNanosec(ts: *timespec) u64 {
+    const result: u64 = @intCast(u64, ts.tv_sec) * 1000000000 + @intCast(u64, ts.tv_nsec);
+    return result;
+}
+
+fn nanosecToTimespec(ns: u64) timespec {
+    const result = timespec{
+        .tv_sec = @intCast(time_t, ns / 1000000000),
+        .tv_nsec = @intCast(c_long, ns % 1000000000),
+    };
+    return result;
+}
 
 fn xErrorHandler(display: ?*Display, event: [*c]XErrorEvent) callconv(.C) c_int {
     var buffer: [512]u8 = undefined;
@@ -33,18 +46,18 @@ fn isExtensionSupported(glx_extensions: [*:0]const u8, extension: []const u8) bo
     const space = ascii.indexOfIgnoreCase(extension, " ");
     assert(space == null); // Extention string should not contain spaces
 
-    const extensions_len = c.strlen(glx_extensions);
+    const extensions_len = strlen(glx_extensions);
 
-    var index: usize = 0;
-    while (ascii.indexOfIgnoreCase(glx_extensions[index..extensions_len], extension)) |where| {
+    var xindex: usize = 0;
+    while (ascii.indexOfIgnoreCase(glx_extensions[xindex..extensions_len], extension)) |where| {
         const terminator = where + extension.len;
-        if (where == index or glx_extensions[where - 1] == ' ') {
+        if (where == xindex or glx_extensions[where - 1] == ' ') {
             if (terminator == extensions_len or glx_extensions[terminator] == ' ') {
                 std.debug.warn("Found GLX Extension: {}\n", .{extension});
                 return true;
             }
         }
-        index = terminator;
+        xindex = terminator;
     }
     return false;
 }
@@ -130,7 +143,6 @@ fn _renderer_build_one_off_program(shader_string_vertex: [:0]const u8, shader_st
         if (info_log_length > 0) {
             var buffer: [2048:0]GLchar = undefined;
             info_log_length = if (buffer.len < info_log_length) buffer.len else info_log_length;
-            // FIXME: NULL couldn't be translated
             glGetProgramInfoLog.?(program, info_log_length, &info_log_length, &buffer[0]);
             std.debug.warn("GL shader LINK status BAD: \"{}\"\n", .{buffer[0..@intCast(usize, info_log_length)]});
             assert(false);
@@ -254,7 +266,7 @@ pub fn main() anyerror!void {
         assert(glx_extensions != null);
         const glXCreateContextAttribsARBProc = fn (?*Display, GLXFBConfig, GLXContext, c_int, [*c]const GLint) callconv(.C) GLXContext;
         const glXCreateContextAttribsARB = @ptrCast(glXCreateContextAttribsARBProc, glXGetProcAddressARB(@ptrCast([*c]const u8, &"glXCreateContextAttribsARB"[0]))); // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
-        _ = c.printf("%s\n", glx_extensions);
+        _ = printf("%s\n", glx_extensions);
         const extension_found = isExtensionSupported(@ptrCast([*:0]const u8, glx_extensions), "GLX_ARB_create_context");
         assert(extension_found);
 
@@ -274,7 +286,11 @@ pub fn main() anyerror!void {
         _ = glXMakeCurrent(display, window, glx_context);
 
         // enable VSync if available
-        if (isExtensionSupported(glx_extensions, "GLX_MESA_swap_control")) {
+        if (isExtensionSupported(glx_extensions, "GLX_EXT_swap_control")) {
+            std.debug.warn("EXT_swap_control is supported\n", .{});
+            const glXSwapIntervalEXT = @ptrCast(PFNGLXSWAPINTERVALEXTPROC, glXGetProcAddressARB(@ptrCast([*c]const u8, &"glXSwapIntervalEXT"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
+            _ = glXSwapIntervalEXT(display, window, 1);
+        } else if (isExtensionSupported(glx_extensions, "GLX_MESA_swap_control")) {
             std.debug.warn("MESA_swap_control is supported\n", .{});
             const glXSwapIntervalMESA = @ptrCast(PFNGLXSWAPINTERVALMESAPROC, glXGetProcAddressARB(@ptrCast([*c]const u8, &"glXSwapIntervalMESA"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
             _ = glXSwapIntervalMESA(1);
@@ -282,10 +298,6 @@ pub fn main() anyerror!void {
             std.debug.warn("SGI_swap_control is supported\n", .{});
             const glXSwapIntervalSGI = @ptrCast(PFNGLXSWAPINTERVALSGIPROC, glXGetProcAddressARB(@ptrCast([*c]const u8, &"glXSwapIntervalSGI"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
             _ = glXSwapIntervalSGI(1);
-        } else if (isExtensionSupported(glx_extensions, "GLX_EXT_swap_control")) {
-            std.debug.warn("EXT_swap_control is supported\n", .{});
-            const glXSwapIntervalEXT = @ptrCast(PFNGLXSWAPINTERVALEXTPROC, glXGetProcAddressARB(@ptrCast([*c]const u8, &"glXSwapIntervalEXT"[0]))).?; // Will (almost) never return NULL, even if the function doesn't exist: https://dri.freedesktop.org/wiki/glXGetProcAddressNeverReturnsNULL/
-            _ = glXSwapIntervalEXT(display, window, 1);
         } else {
             std.debug.warn("VSync not supported\n", .{});
         }
@@ -294,7 +306,7 @@ pub fn main() anyerror!void {
         break :blk glx_context;
     };
     defer {
-        _ = glXMakeCurrent(display, None, @intToPtr(GLXContext, 0)); // FIXME: 0-> NULL, NULL isn't parsing
+        _ = glXMakeCurrent(display, None, null);
         _ = glXDestroyContext(display, glx_context);
     }
 
@@ -303,10 +315,10 @@ pub fn main() anyerror!void {
         const opengl_vendor = glGetString(GL_VENDOR);
         const opengl_renderer = glGetString(GL_RENDERER);
         const opengl_shading_language_version = glGetString(GL_SHADING_LANGUAGE_VERSION);
-        _ = c.printf("opengl version = %s\n", opengl_version);
-        _ = c.printf("opengl vendor = %s\n", opengl_vendor);
-        _ = c.printf("opengl renderer = %s\n", opengl_renderer);
-        _ = c.printf("opengl shading language version = %s\n", opengl_shading_language_version);
+        _ = printf("opengl version = %s\n", opengl_version);
+        _ = printf("opengl vendor = %s\n", opengl_vendor);
+        _ = printf("opengl renderer = %s\n", opengl_renderer);
+        _ = printf("opengl shading language version = %s\n", opengl_shading_language_version);
     }
 
     //// Buffers
@@ -393,6 +405,11 @@ pub fn main() anyerror!void {
     var mouse_x: i32 = 0;
     var mouse_y: i32 = 0;
 
+    const mono_clock: clockid_t = CLOCK_MONOTONIC_RAW;
+    var game_start_timespec: timespec = undefined;
+    assert(clock_gettime(mono_clock, &game_start_timespec) == 0);
+    var frame_start_time = timespecToNanosec(&game_start_timespec);
+
     game_loop: while (true) {
         var display_size_changed = false;
         var should_quit = false;
@@ -428,14 +445,34 @@ pub fn main() anyerror!void {
 
         {
             // Render
-            glClearColor(0.5, 0.7, 0.7, 1.0);
+            glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
 
         // FIXME: only swap if double buffering is enabled?
         glXSwapBuffers(display, window);
         glFinish();
-        // TODO: Proper synchronisation
-        //_ = c.usleep(16000);
+
+        const target_frame_rate = 60;
+        if (target_frame_rate > 0) {
+            var target_delta_time: u64 = 0;
+            target_delta_time = 1000000000 / target_frame_rate;
+
+            var frame_end_timespec: timespec = undefined;
+            assert(clock_gettime(mono_clock, &frame_end_timespec) == 0);
+            const frame_end_time = timespecToNanosec(&frame_end_timespec);
+            var delta_time = frame_end_time - frame_start_time;
+            if (delta_time < target_delta_time) {
+                var sleep_time = nanosecToTimespec(target_delta_time - delta_time);
+                while (nanosleep(&sleep_time, &sleep_time) == -1) {
+                    // FIXME: zig is choking on errno
+                    //std.debug.warn("nanosleep failed! errno={}\n", .{errno});
+                    std.debug.warn("nanosleep failed! errno=???\n", .{});
+                }
+            }
+
+            assert(clock_gettime(mono_clock, &frame_end_timespec) == 0);
+            frame_start_time = timespecToNanosec(&frame_end_timespec);
+        }
     }
 }

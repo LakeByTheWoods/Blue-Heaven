@@ -13,6 +13,8 @@ usingnamespace @cImport({
     @cInclude("GL/gl.h");
     @cInclude("GL/glx.h");
     @cInclude("GL/glext.h");
+
+    @cInclude("simple_font.h");
 });
 
 fn timespecToNanosec(ts: *timespec) u64 {
@@ -198,6 +200,42 @@ const Renderer = struct {
         glUniform4f.?(_program_rect_uniform_location_rect_color, color.r, color.g, color.b, 1.0);
         glUniform2f.?(_program_rect_uniform_location_screen_size, renderer.display_rect.width(), renderer.display_rect.height());
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+
+    fn draw_simple_font_char(renderer: *Renderer, c: u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
+        var y: f32 = left_baseline.y - 12.0 * size;
+
+        var j: u8 = 0;
+        while (j < 16) : (j += 1) {
+            //std.debug.warn("{} {}\n", .{ c, j });
+            const bits = simple_font[c][j];
+            var i: u4 = 0;
+            while (i < 8) : (i += 1) {
+                const x = left_baseline.x + 8.0 * size - @intToFloat(f32, i) * size;
+                if (bits & (@as(u8, 1) << @intCast(u3, i)) != 0) {
+                    renderer.draw_rect(fg_color, Rectf{ .tl = Vector2f{ .x = x, .y = y }, .br = Vector2f{ .x = x + size, .y = y + size } });
+                }
+            }
+            y += size;
+        }
+    }
+
+    fn draw_simple_font_text(renderer: *Renderer, txt: []const u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
+        var c_left_baseline = left_baseline;
+        for (txt) |c| {
+            switch (c) {
+                '\n' => {
+                    c_left_baseline.y += 16 * size;
+                },
+                '\r' => {
+                    c_left_baseline.x = left_baseline.x;
+                },
+                else => {
+                    renderer.draw_simple_font_char(c, fg_color, bg_color, c_left_baseline, size);
+                    c_left_baseline.x += 8 * size;
+                },
+            }
+        }
     }
 };
 
@@ -534,7 +572,9 @@ pub fn main() anyerror!void {
             glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            renderer.draw_rect(Color3f{ .r = 1.0, .g = 1.0, .b = 1.0 }, Rectf{ .tl = Vector2f{ .x = 100, .y = 100 }, .br = Vector2f{ .x = 400, .y = 500 } });
+            //renderer.draw_rect(Color3f{ .r = 1.0, .g = 1.0, .b = 1.0 }, Rectf{ .tl = Vector2f{ .x = 100, .y = 100 }, .br = Vector2f{ .x = 400, .y = 500 } });
+            //renderer.draw_simple_font_char('B', Color3f{ .r = 1.0, .g = 0.0, .b = 0.5 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
+            renderer.draw_simple_font_text("Blue-Heaven", Color3f{ .r = 1.0, .g = 0.7, .b = 1.0 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
         }
 
         // FIXME: only swap if double buffering is enabled?

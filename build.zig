@@ -4,7 +4,9 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("bhvn", "src/main.zig");
+    exe.addCSourceFile("src/simple_font.c", &[_][]const u8{"-std=c99"});
 
+    exe.addIncludeDir("./src/");
     exe.addIncludeDir("/usr/include/");
     exe.linkLibC();
     exe.linkSystemLibrary("X11");

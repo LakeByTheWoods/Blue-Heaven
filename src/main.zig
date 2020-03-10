@@ -155,18 +155,18 @@ fn _renderer_build_one_off_program(shader_string_vertex: [:0]const u8, shader_st
     return program;
 }
 
-const Color3f = struct {
+const Color3f = packed struct {
     r: f32 = 0.0,
     g: f32 = 0.0,
     b: f32 = 0.0,
 };
 
-const Vector2f = struct {
+const Vector2f = packed struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
 };
 
-const Vector3f = struct {
+const Vector3f = packed struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
     z: f32 = 0.0,
@@ -428,10 +428,10 @@ pub fn main() anyerror!void {
     ;
 
     const vertex_buffer_data = [_]GLfloat{
-        -1.0, -1.0, 0.0,
-        1.0,  -1.0, 0.0,
-        1.0,  1.0,  0.0,
-        -1.0, 1.0,  0.0,
+        0.0, 0.0,
+        1.0, 0.0,
+        1.0, 1.0,
+        0.0, 1.0,
     };
     {
         var test_vao: GLuint = undefined;
@@ -442,7 +442,7 @@ pub fn main() anyerror!void {
 
         glGenBuffers.?(1, &test_vbuffer);
         glBindBuffer.?(GL_ARRAY_BUFFER, test_vbuffer);
-        glBufferData.?(GL_ARRAY_BUFFER, vertex_buffer_data.len * @sizeOf(@TypeOf(vertex_buffer_data[0])), &vertex_buffer_data[0], GL_STATIC_DRAW);
+        glBufferData.?(GL_ARRAY_BUFFER, @sizeOf(@TypeOf(vertex_buffer_data)), &vertex_buffer_data[0], GL_STATIC_DRAW);
     }
 
     _program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
@@ -521,6 +521,15 @@ pub fn main() anyerror!void {
         }
 
         {
+            // BlueHeaven = 0075b3
+            // RaspberryDark = ff5a5f
+
+            // Raspberry = c1839f
+            // HoneyComb = efa00b
+
+            // Shadow = 3c3c3c
+            // VanillaIceCream = f5f5f5
+
             // Render
             glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

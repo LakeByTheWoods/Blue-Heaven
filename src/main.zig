@@ -1,6 +1,7 @@
 const std = @import("std");
 const ascii = @import("std").ascii;
 const assert = @import("std").debug.assert;
+const hsluv = @import("hsluv");
 
 usingnamespace @cImport({
     @cInclude("stdio.h");
@@ -163,16 +164,46 @@ const Color3f = packed struct {
     b: f32 = 0.0,
 };
 
+fn colr3f(r: f32, g: f32, b: f32) Color3f {
+    return Color3f{ .r = r, .g = g, .b = b };
+}
+
+const palette = struct {
+    const blue_heaven = hexToColr3f(0x0075b3);
+    const raspberry = hexToColr3f(0xff5a5f);
+
+    const honeycomb = hexToColr3f(0xefa00b);
+
+    const shadow = hexToColr3f(0x3c3c3c);
+    const ice_cream = hexToColr3f(0xf5f5f5);
+};
+
+pub fn hexToColr3f(hex: u24) Color3f {
+    return Color3f{
+        .r = @intToFloat(f32, (hex & 0xFF0000) >> 16) / 255.0,
+        .g = @intToFloat(f32, (hex & 0xFF00) >> 8) / 255.0,
+        .b = @intToFloat(f32, (hex & 0xFF) >> 0) / 255.0,
+    };
+}
+
 const Vector2f = packed struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
 };
+
+fn v2f(x: f32, y: f32) Vector2f {
+    return Vector2f{ .x = x, .y = y };
+}
 
 const Vector3f = packed struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
     z: f32 = 0.0,
 };
+
+fn v3f(x: f32, y: f32, z: f32) Vector2f {
+    return Vector3f{ .x = x, .y = y, .z = z };
+}
 
 const Rectf = struct {
     tl: Vector2f,
@@ -186,6 +217,10 @@ const Rectf = struct {
         return (self.br.y - self.tl.y);
     }
 };
+
+pub fn rectf(pos: Vector2f, size: Vector2f) Rectf {
+    return Rectf{ .tl = pos, .br = v2f(pos.x + size.x, pos.y + size.y) };
+}
 
 var _program_rect: GLuint = undefined;
 var _program_rect_uniform_location_rect: GLint = undefined;
@@ -225,10 +260,8 @@ const Renderer = struct {
         for (txt) |c| {
             switch (c) {
                 '\n' => {
-                    c_left_baseline.y += 16 * size;
-                },
-                '\r' => {
                     c_left_baseline.x = left_baseline.x;
+                    c_left_baseline.y += 16 * size;
                 },
                 else => {
                     renderer.draw_simple_font_char(c, fg_color, bg_color, c_left_baseline, size);
@@ -569,19 +602,58 @@ pub fn main() anyerror!void {
             // VanillaIceCream = f5f5f5
 
             // Render
-            glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
+            comptime const contrast_ratio = hsluv.contrast.W3C_CONTRAST_TEXT + 0.0825757; // +Constant so that light-min and dark-max cross at ~49.39 lightness
+            comptime const lighter_min_L = hsluv.contrast.lighterMinL(contrast_ratio, 0.0);
+            comptime const darker_max_L = hsluv.contrast.darkerMaxL(contrast_ratio, 100.0);
+            //std.debug.warn("bg fg={} {}\n", .{ lighter_min_L, darker_max_L });
+
+            const bg_lightness = @intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100;
+            const fg_lightness = if (bg_lightness < lighter_min_L)
+                hsluv.contrast.lighterMinL(contrast_ratio, bg_lightness)
+            else
+                hsluv.contrast.darkerMaxL(contrast_ratio, bg_lightness);
+
+            //std.debug.warn("fg={} bg={}\n", .{ fg_lightness, bg_lightness });
+
+            const hsl_bg = [3]f64{
+                @intToFloat(f64, mouse_x) / @intToFloat(f64, display_width) * 360,
+                //@intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100,
+                85,
+                bg_lightness,
+            };
+            //const hsl_bg = hsluv.rgbToHsluv([3]f64{ 0.1, 1.0, 0.5 });
+            //std.debug.warn("HSL={} {} {}\n", .{ hsl[0], hsl[1], hsl[2] });
+            const clear_colour = hsluv.hsluvToRgb(hsl_bg);
+
+            //glClearColor(0.0 / 255.0, 117.0 / 255.0, 179.0 / 255.0, 1.0);
+            glClearColor(@floatCast(f32, clear_colour[0]), @floatCast(f32, clear_colour[1]), @floatCast(f32, clear_colour[2]), 1.0);
+            //std.debug.warn("rgb = {} {} {}\n", .{ @floatToInt(i32, clear_colour[0] * 255), @floatToInt(i32, clear_colour[1] * 255), @floatToInt(i32, clear_colour[2] * 255) });
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+            const hsl_fg = [3]f64{
+                @intToFloat(f64, mouse_x) / @intToFloat(f64, display_width) * 360,
+                //@intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100,
+                85,
+                fg_lightness,
+            };
+            const text_colour_array = hsluv.hsluvToRgb(hsl_fg);
+            const text_colour = colr3f(@floatCast(f32, text_colour_array[0]), @floatCast(f32, text_colour_array[1]), @floatCast(f32, text_colour_array[2]));
             //renderer.draw_rect(Color3f{ .r = 1.0, .g = 1.0, .b = 1.0 }, Rectf{ .tl = Vector2f{ .x = 100, .y = 100 }, .br = Vector2f{ .x = 400, .y = 500 } });
             //renderer.draw_simple_font_char('B', Color3f{ .r = 1.0, .g = 0.0, .b = 0.5 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
-            renderer.draw_simple_font_text("Blue-Heaven", Color3f{ .r = 1.0, .g = 0.7, .b = 1.0 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
+            renderer.draw_simple_font_text(
+                \\the quick brown fox
+                \\jumps over the lazy dog
+                \\
+                \\THE QUICK BROWN FOX
+                \\JUMPS OVER THE LAZY DOG
+            , text_colour, palette.shadow, Vector2f{ .x = 100, .y = 100 }, 3.0);
         }
 
         // FIXME: only swap if double buffering is enabled?
         glXSwapBuffers(display, window);
         glFinish();
 
-        const target_frame_rate = 60;
+        const target_frame_rate = 12;
         if (target_frame_rate > 0) {
             var target_delta_time: u64 = 0;
             target_delta_time = 1000000000 / target_frame_rate;

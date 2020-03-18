@@ -5,7 +5,7 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("bhvn", "src/main.zig");
     exe.addCSourceFile("src/simple_font.c", &[_][]const u8{"-std=c99"});
-    exe.addPackagePath("hsluv", "/home/lachlan/hsluvzig/hsluv/hsluv.zig");
+    exe.addPackagePath("hsluv", "/home/lachlan/hsluvzig/hsluv.zig");
 
     exe.addIncludeDir("./src/");
     exe.addIncludeDir("/usr/include/");

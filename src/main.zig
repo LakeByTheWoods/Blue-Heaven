@@ -329,7 +329,8 @@ fn linmap(v: var, a: @TypeOf(v), b: @TypeOf(v), c: @TypeOf(v), d: @TypeOf(v)) @T
     }
 }
 
-fn drawSlider(renderer: *Renderer, comptime T: type, slider_val: *T, val_min: T, val_max: T, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
+fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val).Child, val_max: @TypeOf(slider_val).Child, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
+    assert(@typeInfo(@TypeOf(slider_val)) == .Pointer);
     const track_rect = rectfsep(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
 
     const half_width = knob_size.x / 2.0;
@@ -661,6 +662,8 @@ pub fn main() anyerror!void {
     var colour_select_saturation: f32 = 0.0;
     var colour_select_lightness: f32 = 0.0;
     var colour_select_hue_grabbed = false;
+    var colour_select_saturation_grabbed = false;
+    var colour_select_lightness_grabbed = false;
 
     var mouse_state = MouseState{};
 
@@ -750,20 +753,17 @@ pub fn main() anyerror!void {
             comptime const darker_max_L = hsluv.contrast.darkerMaxL(contrast_ratio, 100.0);
             //std.debug.warn("bg fg={} {}\n", .{ lighter_min_L, darker_max_L });
 
-            const bg_lightness = @intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100;
-            const fg_lightness = if (bg_lightness < lighter_min_L)
-                hsluv.contrast.lighterMinL(contrast_ratio, bg_lightness)
+            const fg_lightness = if (colour_select_lightness < lighter_min_L)
+                hsluv.contrast.lighterMinL(contrast_ratio, colour_select_lightness)
             else
-                hsluv.contrast.darkerMaxL(contrast_ratio, bg_lightness);
+                hsluv.contrast.darkerMaxL(contrast_ratio, colour_select_lightness);
 
-            //std.debug.warn("fg={} bg={}\n", .{ fg_lightness, bg_lightness });
+            //std.debug.warn("fg={} bg={}\n", .{ fg_lightness, colour_select_lightness });
 
             const hsl_bg = [3]f64{
                 colour_select_hue,
-                //@intToFloat(f64, mouse_state.x) / @intToFloat(f64, display_width) * 360,
-                //@intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100,
-                85,
-                bg_lightness,
+                colour_select_saturation,
+                colour_select_lightness,
             };
             //const hsl_bg = hsluv.rgbToHsluv([3]f64{ 0.1, 1.0, 0.5 });
             //std.debug.warn("HSL={} {} {}\n", .{ hsl[0], hsl[1], hsl[2] });
@@ -775,9 +775,8 @@ pub fn main() anyerror!void {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             const hsl_fg = [3]f64{
-                @intToFloat(f64, mouse_state.x) / @intToFloat(f64, display_width) * 360,
-                //@intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100,
-                85,
+                colour_select_hue,
+                colour_select_saturation,
                 fg_lightness,
             };
             const text_colour_array = hsluv.hsluvToRgb(hsl_fg);
@@ -785,7 +784,6 @@ pub fn main() anyerror!void {
 
             drawSlider(
                 &renderer,
-                f32,
                 &colour_select_hue,
                 0.0,
                 360.0,
@@ -793,6 +791,30 @@ pub fn main() anyerror!void {
                 Vector2f{ .x = 20, .y = 40 },
                 Vector2f{ .x = 400, .y = 10 },
                 &colour_select_hue_grabbed,
+                &mouse_state,
+            );
+
+            drawSlider(
+                &renderer,
+                &colour_select_saturation,
+                0.0,
+                100.0,
+                Vector2f{ .x = 40.0, .y = 350.0 },
+                Vector2f{ .x = 20, .y = 40 },
+                Vector2f{ .x = 400, .y = 10 },
+                &colour_select_saturation_grabbed,
+                &mouse_state,
+            );
+
+            drawSlider(
+                &renderer,
+                &colour_select_lightness,
+                0.0,
+                100.0,
+                Vector2f{ .x = 40.0, .y = 400.0 },
+                Vector2f{ .x = 20, .y = 40 },
+                Vector2f{ .x = 400, .y = 10 },
+                &colour_select_lightness_grabbed,
                 &mouse_state,
             );
             //renderer.draw_simple_font_char('B', Color3f{ .r = 1.0, .g = 0.0, .b = 0.5 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);

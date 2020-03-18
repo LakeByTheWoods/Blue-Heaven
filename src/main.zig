@@ -222,8 +222,8 @@ pub fn rectf(pos: Vector2f, size: Vector2f) Rectf {
     return Rectf{ .tl = pos, .br = v2f(pos.x + size.x, pos.y + size.y) };
 }
 
-pub fn rectfsep(pos_x: f32, pos_y: f32, size_width: f32, size_y: f32) Rectf {
-    return Rectf{ .tl = v2f(pos_x, pos_y), .br = v2f(pos_x + size_width, pos_y + size_y) };
+pub fn rectfsep(pos_x: f32, pos_y: f32, size_x: f32, size_y: f32) Rectf {
+    return Rectf{ .tl = v2f(pos_x, pos_y), .br = v2f(pos_x + size_x, pos_y + size_y) };
 }
 
 pub fn collision_rectf_v2f(rect: Rectf, v: Vector2f) bool {
@@ -280,18 +280,73 @@ const Renderer = struct {
     }
 };
 
-fn drawSlider(comptime T: type, slider_val: *T, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
+fn lerp(t: var, a: var, b: @TypeOf(a)) @TypeOf(a) {
+    // TODO: Could be replaced with FMA when available
+    const T = @TypeOf(t);
+    const A = @TypeOf(a);
+    std.debug.assert(@typeInfo(T) == .Float);
+    switch (@typeInfo(@TypeOf(a))) {
+        .ComptimeInt,
+        .Int,
+        => {
+            return @floatToInt(A, (1.0 - t) * @intToFloat(T, a) + t * @intToFloat(T, b));
+        },
+        .Float => {
+            return (1.0 - t) * a + t * b;
+        },
+        else => unreachable,
+    }
+}
+
+fn unlerp(comptime ReturnType: type, v: var, a: @TypeOf(v), b: @TypeOf(v)) ReturnType {
+    std.debug.assert(@typeInfo(ReturnType) == .Float);
+
+    switch (@typeInfo(@TypeOf(v))) {
+        .ComptimeInt,
+        .Int,
+        => {
+            return ((v - @intToFloat(ReturnType, a)) / @intToFloat(ReturnType, b - a));
+        },
+        .Float => {
+            std.debug.assert(ReturnType == @TypeOf(v));
+            return (v - a) / (b - a);
+        },
+        else => unreachable,
+    }
+}
+
+fn linmap(v: var, a: @TypeOf(v), b: @TypeOf(v), c: @TypeOf(v), d: @TypeOf(v)) @TypeOf(v) {
+    switch (@typeInfo(@TypeOf(v))) {
+        .ComptimeInt,
+        .Int,
+        => {
+            return lerp(unlerp(f64, v, a, b), c, d);
+        },
+        .Float => {
+            return lerp(unlerp(@TypeOf(v), v, a, b), c, d);
+        },
+        else => unreachable,
+    }
+}
+
+fn drawSlider(renderer: *Renderer, comptime T: type, slider_val: *T, val_min: T, val_max: T, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
     const track_rect = rectfsep(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
 
-    var val = slider_val.*;
-    var knob_x = pos.x + val * (track_size.x - knob_size.x) / val_max;
+    const half_width = knob_size.x / 2.0;
+
+    const knob_min = pos.x;
+    const knob_max = pos.x + (track_size.x - knob_size.x);
+
+    var knob_x = linmap(slider_val.*, val_min, val_max, knob_min, knob_max);
     var knob_rect = rectfsep(knob_x, pos.y, knob_size.x, knob_size.y);
+
+    var knob_mid = knob_x + half_width;
 
     if (grabbed.*) {
         if (mouse.*.button1_down) {
-            val = @intToFloat(f32, mouse.*.x - 40 - 10);
+            knob_mid = @intToFloat(f32, mouse.*.x);
         } else {
-            val = @intToFloat(f32, mouse.*.button1_end_x - 40 - 10);
+            knob_mid = @intToFloat(f32, mouse.*.button1_end_x);
             grabbed.* = false;
         }
     } else if (mouse.*.button1_down) {
@@ -299,19 +354,31 @@ fn drawSlider(comptime T: type, slider_val: *T, pos: Vector2f, knob_size: Vector
             knob_rect,
             v2f(@intToFloat(f32, mouse.*.x), @intToFloat(f32, mouse.*.y)),
         )) {
-            val = @intToFloat(f32, mouse.*.x - 40 - 10);
+            knob_mid = @intToFloat(f32, mouse.*.x);
             grabbed.* = true;
         }
     }
 
-    slider_val.* = std.math.clamp(val, @as(f32, 0.0), @as(f32, 360.0));
+    knob_x = std.math.clamp(knob_mid - half_width, @as(f32, knob_min), @as(f32, knob_max));
+    slider_val.* = linmap(knob_x, knob_min, knob_max, val_min, val_max);
 
-    knob_x = pos.x + val * (track_size.x - knob_size.x) / val_max;
     knob_rect = rectfsep(knob_x, pos.y, knob_size.x, knob_size.y);
 
-    renderer.draw_rect(colr3f(0.5, 0.5, 0.5), rectfsep(40, 310, 360 + 20, 10));
-    renderer.draw_rect(colr3f(1.0, 1.0, 1.0), colour_select_rect);
+    renderer.draw_rect(colr3f(0.5, 0.5, 0.5), track_rect);
+    renderer.draw_rect(colr3f(1.0, 1.0, 1.0), knob_rect);
 }
+
+const MouseState = struct {
+    button1_down: bool = false,
+    button1_begin_x: c_int = 0,
+    button1_begin_y: c_int = 0,
+
+    button1_end_x: c_int = 0,
+    button1_end_y: c_int = 0,
+
+    x: i32 = 0,
+    y: i32 = 0,
+};
 
 pub fn main() anyerror!void {
     const display: *Display = XOpenDisplay(0).?;
@@ -578,9 +645,6 @@ pub fn main() anyerror!void {
     var display_height: i32 = window_attributes.height;
     std.debug.warn("width={}, height={}\n", .{ display_width, display_height });
 
-    var mouse_x: i32 = 0;
-    var mouse_y: i32 = 0;
-
     const mono_clock: clockid_t = CLOCK_MONOTONIC_RAW;
     var game_start_timespec: timespec = undefined;
     assert(clock_gettime(mono_clock, &game_start_timespec) == 0);
@@ -598,12 +662,7 @@ pub fn main() anyerror!void {
     var colour_select_lightness: f32 = 0.0;
     var colour_select_hue_grabbed = false;
 
-    var mouse_button1_down = false;
-    var mouse_button1_begin_x: c_int = 0;
-    var mouse_button1_begin_y: c_int = 0;
-
-    var mouse_button1_end_x: c_int = 0;
-    var mouse_button1_end_y: c_int = 0;
+    var mouse_state = MouseState{};
 
     game_loop: while (true) {
         var display_size_changed = false;
@@ -631,31 +690,31 @@ pub fn main() anyerror!void {
                     }
                 },
                 MotionNotify => {
-                    mouse_x = event.xmotion.x;
-                    mouse_y = event.xmotion.y;
+                    mouse_state.x = event.xmotion.x;
+                    mouse_state.y = event.xmotion.y;
                     got_input_event = true;
                 },
                 KeyPress => {},
                 KeyRelease => {},
                 ButtonPress => {
                     if (event.xbutton.button == Button1) {
-                        mouse_button1_down = true;
-                        mouse_button1_begin_x = event.xbutton.x;
-                        mouse_button1_begin_y = event.xbutton.y;
+                        mouse_state.button1_down = true;
+                        mouse_state.button1_begin_x = event.xbutton.x;
+                        mouse_state.button1_begin_y = event.xbutton.y;
 
-                        mouse_x = event.xbutton.x;
-                        mouse_y = event.xbutton.y;
+                        mouse_state.x = event.xbutton.x;
+                        mouse_state.y = event.xbutton.y;
                         std.debug.warn("Time = {}\n", .{event.xbutton.time});
                     }
                 },
                 ButtonRelease => {
                     if (event.xbutton.button == Button1) {
-                        if (!mouse_button1_down) {
+                        if (!mouse_state.button1_down) {
                             std.debug.warn("Got button release with no matching button press, ignoring\n", .{});
                         } else {
-                            mouse_button1_down = false;
-                            mouse_button1_end_x = event.xbutton.x;
-                            mouse_button1_end_y = event.xbutton.y;
+                            mouse_state.button1_down = false;
+                            mouse_state.button1_end_x = event.xbutton.x;
+                            mouse_state.button1_end_y = event.xbutton.y;
                             std.debug.warn("Time = {}\n", .{event.xbutton.time});
                         }
                     }
@@ -691,7 +750,7 @@ pub fn main() anyerror!void {
             comptime const darker_max_L = hsluv.contrast.darkerMaxL(contrast_ratio, 100.0);
             //std.debug.warn("bg fg={} {}\n", .{ lighter_min_L, darker_max_L });
 
-            const bg_lightness = @intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100;
+            const bg_lightness = @intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100;
             const fg_lightness = if (bg_lightness < lighter_min_L)
                 hsluv.contrast.lighterMinL(contrast_ratio, bg_lightness)
             else
@@ -700,8 +759,9 @@ pub fn main() anyerror!void {
             //std.debug.warn("fg={} bg={}\n", .{ fg_lightness, bg_lightness });
 
             const hsl_bg = [3]f64{
-                @intToFloat(f64, mouse_x) / @intToFloat(f64, display_width) * 360,
-                //@intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100,
+                colour_select_hue,
+                //@intToFloat(f64, mouse_state.x) / @intToFloat(f64, display_width) * 360,
+                //@intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100,
                 85,
                 bg_lightness,
             };
@@ -715,29 +775,26 @@ pub fn main() anyerror!void {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             const hsl_fg = [3]f64{
-                @intToFloat(f64, mouse_x) / @intToFloat(f64, display_width) * 360,
-                //@intToFloat(f64, mouse_y) / @intToFloat(f64, display_height) * 100,
+                @intToFloat(f64, mouse_state.x) / @intToFloat(f64, display_width) * 360,
+                //@intToFloat(f64, mouse_state.y) / @intToFloat(f64, display_height) * 100,
                 85,
                 fg_lightness,
             };
             const text_colour_array = hsluv.hsluvToRgb(hsl_fg);
             const text_colour = colr3f(@floatCast(f32, text_colour_array[0]), @floatCast(f32, text_colour_array[1]), @floatCast(f32, text_colour_array[2]));
 
-            const colour_select_rect = rectfsep(40 + colour_select_hue, 300, 20, 30);
-            renderer.draw_rect(colr3f(0.5, 0.5, 0.5), rectfsep(40, 310, 360 + 20, 10));
-            renderer.draw_rect(colr3f(1.0, 1.0, 1.0), colour_select_rect);
-            if (colour_select_hue_grabbed) {
-                if (mouse_button1_down) {
-                    colour_select_hue = @intToFloat(f32, mouse_x - 40 - 10);
-                } else {
-                    colour_select_hue = @intToFloat(f32, mouse_button1_end_x - 40 - 10);
-                    colour_select_hue_grabbed = false;
-                }
-            } else if (mouse_button1_down and collision_rectf_v2f(colour_select_rect, v2f(@intToFloat(f32, mouse_x), @intToFloat(f32, mouse_y)))) {
-                colour_select_hue_grabbed = true;
-                colour_select_hue = @intToFloat(f32, mouse_x - 40 - 10);
-            }
-            colour_select_hue = std.math.clamp(colour_select_hue, @as(f32, 0.0), @as(f32, 360.0));
+            drawSlider(
+                &renderer,
+                f32,
+                &colour_select_hue,
+                0.0,
+                360.0,
+                Vector2f{ .x = 40.0, .y = 300.0 },
+                Vector2f{ .x = 20, .y = 40 },
+                Vector2f{ .x = 400, .y = 10 },
+                &colour_select_hue_grabbed,
+                &mouse_state,
+            );
             //renderer.draw_simple_font_char('B', Color3f{ .r = 1.0, .g = 0.0, .b = 0.5 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
             renderer.draw_simple_font_text(
                 \\the quick brown fox

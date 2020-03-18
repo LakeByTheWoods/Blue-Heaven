@@ -189,10 +189,19 @@ pub fn hexToColr3f(hex: u24) Color3f {
 const Vector2f = packed struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
+
+    pub fn add(self: *Vector2f, other: Vector2f) void {
+        self.*.x += other.x;
+        self.*.y += other.y;
+    }
 };
 
 fn v2f(x: f32, y: f32) Vector2f {
     return Vector2f{ .x = x, .y = y };
+}
+
+fn v2fAdd(a: Vector2f, b: Vector2f) Vector2f {
+    return Vector2f{ .x = a.x + b.x, .y = a.y + b.y };
 }
 
 const Vector3f = packed struct {
@@ -332,6 +341,7 @@ fn linmap(v: var, a: @TypeOf(v), b: @TypeOf(v), c: @TypeOf(v), d: @TypeOf(v)) @T
 fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val).Child, val_max: @TypeOf(slider_val).Child, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
     assert(@typeInfo(@TypeOf(slider_val)) == .Pointer);
     const track_rect = rectfsep(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
+    const track_rect_inner = rectfsep(pos.x + 2, pos.y + knob_size.y / 2 - track_size.y / 2 + 2, track_size.x - 2 * 2, track_size.y - 2 * 2);
 
     const half_width = knob_size.x / 2.0;
 
@@ -353,7 +363,11 @@ fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val)
     } else if (mouse.*.button1_down) {
         if (collision_rectf_v2f(
             knob_rect,
-            v2f(@intToFloat(f32, mouse.*.x), @intToFloat(f32, mouse.*.y)),
+            v2f(@intToFloat(f32, mouse.*.button1_begin_x), @intToFloat(f32, mouse.*.button1_begin_y)),
+        ) or
+            collision_rectf_v2f(
+            track_rect,
+            v2f(@intToFloat(f32, mouse.*.button1_begin_x), @intToFloat(f32, mouse.*.button1_begin_y)),
         )) {
             knob_mid = @intToFloat(f32, mouse.*.x);
             grabbed.* = true;
@@ -364,9 +378,12 @@ fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val)
     slider_val.* = linmap(knob_x, knob_min, knob_max, val_min, val_max);
 
     knob_rect = rectfsep(knob_x, pos.y, knob_size.x, knob_size.y);
+    const knob_rect_inner = rectfsep(knob_x + 5, pos.y + 5, knob_size.x - 5 * 2, knob_size.y - 5 * 2);
 
-    renderer.draw_rect(colr3f(0.5, 0.5, 0.5), track_rect);
-    renderer.draw_rect(colr3f(1.0, 1.0, 1.0), knob_rect);
+    renderer.draw_rect(colr3f(0.0, 0.0, 0.0), track_rect);
+    renderer.draw_rect(colr3f(0.5, 0.5, 0.5), track_rect_inner);
+    renderer.draw_rect(colr3f(0.0, 0.0, 0.0), knob_rect);
+    renderer.draw_rect(colr3f(1.0, 1.0, 1.0), knob_rect_inner);
 }
 
 const MouseState = struct {
@@ -658,9 +675,9 @@ pub fn main() anyerror!void {
         },
     };
 
-    var colour_select_hue: f32 = 0.0;
-    var colour_select_saturation: f32 = 0.0;
-    var colour_select_lightness: f32 = 0.0;
+    var colour_select_hue: f32 = 200.0;
+    var colour_select_saturation: f32 = 60.0;
+    var colour_select_lightness: f32 = 40.0;
     var colour_select_hue_grabbed = false;
     var colour_select_saturation_grabbed = false;
     var colour_select_lightness_grabbed = false;
@@ -782,42 +799,49 @@ pub fn main() anyerror!void {
             const text_colour_array = hsluv.hsluvToRgb(hsl_fg);
             const text_colour = colr3f(@floatCast(f32, text_colour_array[0]), @floatCast(f32, text_colour_array[1]), @floatCast(f32, text_colour_array[2]));
 
+            var layout_cursor = Vector2f{ .x = 40.0, .y = 300 };
+
             drawSlider(
                 &renderer,
                 &colour_select_hue,
                 0.0,
                 360.0,
-                Vector2f{ .x = 40.0, .y = 300.0 },
+                layout_cursor,
                 Vector2f{ .x = 20, .y = 40 },
                 Vector2f{ .x = 400, .y = 10 },
                 &colour_select_hue_grabbed,
                 &mouse_state,
             );
+            layout_cursor.add(v2f(0.0, 50));
 
             drawSlider(
                 &renderer,
                 &colour_select_saturation,
                 0.0,
                 100.0,
-                Vector2f{ .x = 40.0, .y = 350.0 },
+                layout_cursor,
                 Vector2f{ .x = 20, .y = 40 },
                 Vector2f{ .x = 400, .y = 10 },
                 &colour_select_saturation_grabbed,
                 &mouse_state,
             );
+            layout_cursor.add(v2f(0.0, 50));
 
             drawSlider(
                 &renderer,
                 &colour_select_lightness,
                 0.0,
                 100.0,
-                Vector2f{ .x = 40.0, .y = 400.0 },
+                layout_cursor,
                 Vector2f{ .x = 20, .y = 40 },
                 Vector2f{ .x = 400, .y = 10 },
                 &colour_select_lightness_grabbed,
                 &mouse_state,
             );
-            //renderer.draw_simple_font_char('B', Color3f{ .r = 1.0, .g = 0.0, .b = 0.5 }, Color3f{ .r = 0.0, .g = 0.0, .b = 0.0 }, Vector2f{ .x = 100, .y = 100 }, 3.0);
+            layout_cursor.add(v2f(0.0, 50));
+
+            renderer.draw_simple_font_text(&hsluv.rgbToHex(clear_colour), text_colour, palette.shadow, Vector2f{ .x = 100, .y = 500 }, 3.0); // BG
+            renderer.draw_simple_font_text(&hsluv.rgbToHex(text_colour_array), text_colour, palette.shadow, Vector2f{ .x = 280, .y = 500 }, 3.0); // FG
             renderer.draw_simple_font_text(
                 \\the quick brown fox
                 \\jumps over the lazy dog

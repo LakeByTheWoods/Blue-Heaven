@@ -684,6 +684,10 @@ pub fn main() anyerror!void {
 
     var mouse_state = MouseState{};
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
     game_loop: while (true) {
         var display_size_changed = false;
         var should_quit = false;
@@ -842,6 +846,10 @@ pub fn main() anyerror!void {
 
             renderer.draw_simple_font_text(&hsluv.rgbToHex(clear_colour), text_colour, palette.shadow, Vector2f{ .x = 100, .y = 500 }, 3.0); // BG
             renderer.draw_simple_font_text(&hsluv.rgbToHex(text_colour_array), text_colour, palette.shadow, Vector2f{ .x = 280, .y = 500 }, 3.0); // FG
+
+            const picker_geo = try hsluv.color_picker.getPickerGeometry(allocator, colour_select_lightness);
+            defer picker_geo.deinit();
+
             renderer.draw_simple_font_text(
                 \\the quick brown fox
                 \\jumps over the lazy dog

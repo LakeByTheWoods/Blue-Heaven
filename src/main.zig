@@ -3,6 +3,8 @@ const ascii = @import("std").ascii;
 const assert = @import("std").debug.assert;
 const hsluv = @import("hsluv");
 
+usingnamespace @import("turtle.zig");
+
 usingnamespace @cImport({
     @cInclude("stdio.h");
     @cInclude("string.h");
@@ -399,6 +401,15 @@ const MouseState = struct {
 };
 
 pub fn main() anyerror!void {
+    {
+        turtle_begin();
+        defer turtle_end();
+
+        const hrz_0 = turtle_push(.Horizontal, .{});
+        defer turtle_pop(hrz_0);
+        const rct_0 = turtle_push(.Rect, .{ .left = 100, .top = 200, .right = 300, .bottom = 400 });
+        defer turtle_pop(rct_0);
+    }
     const display: *Display = XOpenDisplay(0).?;
     defer {
         _ = XSync(display, 0);

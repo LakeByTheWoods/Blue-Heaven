@@ -67,99 +67,6 @@ fn isExtensionSupported(glx_extensions: [*:0]const u8, extension: []const u8) bo
     return false;
 }
 
-fn init_gl_proc(comptime T: type, name: [:0]const u8) T {
-    return @ptrCast(T, glXGetProcAddressARB(@ptrCast(*const GLubyte, &name[0])));
-}
-
-//// Buffers
-var glGenBuffers: PFNGLGENBUFFERSPROC = undefined;
-var glBindBuffer: PFNGLBINDBUFFERPROC = undefined;
-var glBufferData: PFNGLBUFFERDATAPROC = undefined;
-
-//// Vertex Arrays and Attributes
-var glVertexAttribPointer: PFNGLVERTEXATTRIBPOINTERPROC = undefined;
-var glGenVertexArrays: PFNGLGENVERTEXARRAYSPROC = undefined;
-var glBindVertexArray: PFNGLBINDVERTEXARRAYPROC = undefined;
-var glEnableVertexAttribArray: PFNGLENABLEVERTEXATTRIBARRAYPROC = undefined;
-var glDisableVertexAttribArray: PFNGLDISABLEVERTEXATTRIBARRAYPROC = undefined;
-
-//// Uniforms
-var glGetUniformLocation: PFNGLGETUNIFORMLOCATIONPROC = undefined;
-var glUniform2f: PFNGLUNIFORM2FPROC = undefined;
-var glUniform4f: PFNGLUNIFORM4FPROC = undefined;
-var glUniformMatrix4fv: PFNGLUNIFORMMATRIX4FVPROC = undefined;
-
-//// Shader creation
-var glCreateShader: PFNGLCREATESHADERPROC = undefined;
-var glAttachShader: PFNGLATTACHSHADERPROC = undefined;
-var glDetachShader: PFNGLDETACHSHADERPROC = undefined;
-var glDeleteShader: PFNGLDELETESHADERPROC = undefined;
-var glShaderSource: PFNGLSHADERSOURCEPROC = undefined;
-var glCompileShader: PFNGLCOMPILESHADERPROC = undefined;
-var glGetShaderiv: PFNGLGETSHADERIVPROC = undefined;
-var glGetShaderInfoLog: PFNGLGETSHADERINFOLOGPROC = undefined;
-
-//// Program creation
-var glCreateProgram: PFNGLCREATEPROGRAMPROC = undefined;
-var glLinkProgram: PFNGLLINKPROGRAMPROC = undefined;
-var glGetProgramiv: PFNGLGETPROGRAMIVPROC = undefined;
-var glGetProgramInfoLog: PFNGLGETPROGRAMINFOLOGPROC = undefined;
-var glUseProgram: PFNGLUSEPROGRAMPROC = undefined;
-
-fn _check_shader_compile_status(shader: GLuint) void {
-    var success: GLint = undefined;
-    glGetShaderiv.?(shader, GL_COMPILE_STATUS, &success);
-    if (success == GL_FALSE) {
-        var buffer: [2048:0]GLchar = undefined;
-        var max_length: GLint = undefined;
-        glGetShaderiv.?(shader, GL_INFO_LOG_LENGTH, &max_length);
-        max_length = if (buffer.len < max_length) buffer.len else max_length;
-        glGetShaderInfoLog.?(shader, max_length, &max_length, &buffer[0]);
-        glDeleteShader.?(shader);
-        std.debug.warn("GL shader compile status BAD: \"{}\"\n", .{buffer[0..@intCast(usize, max_length)]});
-        assert(false);
-    } else std.debug.warn("GL shader compile status GOOD\n", .{});
-}
-
-fn _renderer_build_one_off_program(shader_string_vertex: [:0]const u8, shader_string_fragment: [:0]const u8) GLuint {
-    const shader_vert = glCreateShader.?(GL_VERTEX_SHADER);
-    const shader_frag = glCreateShader.?(GL_FRAGMENT_SHADER);
-
-    glShaderSource.?(shader_vert, 1, &(&shader_string_vertex[0]), 0);
-    glShaderSource.?(shader_frag, 1, &(&shader_string_fragment[0]), 0);
-
-    glCompileShader.?(shader_vert);
-    _check_shader_compile_status(shader_vert);
-
-    glCompileShader.?(shader_frag);
-    _check_shader_compile_status(shader_frag);
-
-    const program = glCreateProgram.?();
-    glAttachShader.?(program, shader_vert);
-    glAttachShader.?(program, shader_frag);
-
-    std.debug.warn("Linking shader program\n", .{});
-    glLinkProgram.?(program);
-    {
-        var result: GLint = undefined;
-        var info_log_length: GLint = undefined;
-        glGetProgramiv.?(program, GL_LINK_STATUS, &result);
-        glGetProgramiv.?(program, GL_INFO_LOG_LENGTH, &info_log_length);
-        if (info_log_length > 0) {
-            var buffer: [2048:0]GLchar = undefined;
-            info_log_length = if (buffer.len < info_log_length) buffer.len else info_log_length;
-            glGetProgramInfoLog.?(program, info_log_length, &info_log_length, &buffer[0]);
-            std.debug.warn("GL shader LINK status BAD: \"{}\"\n", .{buffer[0..@intCast(usize, info_log_length)]});
-            assert(false);
-        } else std.debug.warn("GL shader LINK status GOOD\n", .{});
-    }
-    glDetachShader.?(program, shader_vert);
-    glDetachShader.?(program, shader_frag);
-    glDeleteShader.?(shader_vert);
-    glDeleteShader.?(shader_frag);
-    return program;
-}
-
 const Color3f = packed struct {
     r: f32 = 0.0,
     g: f32 = 0.0,
@@ -233,63 +140,13 @@ pub fn rectf(pos: Vector2f, size: Vector2f) Rectf {
     return Rectf{ .tl = pos, .br = v2f(pos.x + size.x, pos.y + size.y) };
 }
 
-pub fn rectfsep(pos_x: f32, pos_y: f32, size_x: f32, size_y: f32) Rectf {
+pub fn rectfwh(pos_x: f32, pos_y: f32, size_x: f32, size_y: f32) Rectf {
     return Rectf{ .tl = v2f(pos_x, pos_y), .br = v2f(pos_x + size_x, pos_y + size_y) };
 }
 
 pub fn collision_rectf_v2f(rect: Rectf, v: Vector2f) bool {
     return (v.x > rect.tl.x and v.x < rect.br.x and v.y > rect.tl.y and v.y < rect.br.y);
 }
-
-var _program_rect: GLuint = undefined;
-var _program_rect_uniform_location_rect: GLint = undefined;
-var _program_rect_uniform_location_rect_color: GLint = undefined;
-var _program_rect_uniform_location_screen_size: GLint = undefined;
-
-const Renderer = struct {
-    display_rect: Rectf,
-    fn draw_rect(renderer: *Renderer, color: Color3f, rect: Rectf) void {
-        glUseProgram.?(_program_rect);
-        glUniform4f.?(_program_rect_uniform_location_rect, rect.tl.x, rect.tl.y, rect.br.x, rect.br.y);
-        glUniform4f.?(_program_rect_uniform_location_rect_color, color.r, color.g, color.b, 1.0);
-        glUniform2f.?(_program_rect_uniform_location_screen_size, renderer.display_rect.width(), renderer.display_rect.height());
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    }
-
-    fn draw_simple_font_char(renderer: *Renderer, c: u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
-        var y: f32 = left_baseline.y - 12.0 * size;
-
-        var j: u8 = 0;
-        while (j < 16) : (j += 1) {
-            //std.debug.warn("{} {}\n", .{ c, j });
-            const bits = simple_font[c][j];
-            var i: u4 = 0;
-            while (i < 8) : (i += 1) {
-                const x = left_baseline.x + 8.0 * size - @intToFloat(f32, i) * size;
-                if (bits & (@as(u8, 1) << @intCast(u3, i)) != 0) {
-                    renderer.draw_rect(fg_color, Rectf{ .tl = Vector2f{ .x = x, .y = y }, .br = Vector2f{ .x = x + size, .y = y + size } });
-                }
-            }
-            y += size;
-        }
-    }
-
-    fn draw_simple_font_text(renderer: *Renderer, txt: []const u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
-        var c_left_baseline = left_baseline;
-        for (txt) |c| {
-            switch (c) {
-                '\n' => {
-                    c_left_baseline.x = left_baseline.x;
-                    c_left_baseline.y += 16 * size;
-                },
-                else => {
-                    renderer.draw_simple_font_char(c, fg_color, bg_color, c_left_baseline, size);
-                    c_left_baseline.x += 8 * size;
-                },
-            }
-        }
-    }
-};
 
 fn lerp(t: var, a: var, b: @TypeOf(a)) @TypeOf(a) {
     // TODO: Could be replaced with FMA when available
@@ -342,8 +199,8 @@ fn linmap(v: var, a: @TypeOf(v), b: @TypeOf(v), c: @TypeOf(v), d: @TypeOf(v)) @T
 
 fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val).Child, val_max: @TypeOf(slider_val).Child, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
     assert(@typeInfo(@TypeOf(slider_val)) == .Pointer);
-    const track_rect = rectfsep(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
-    const track_rect_inner = rectfsep(pos.x + 2, pos.y + knob_size.y / 2 - track_size.y / 2 + 2, track_size.x - 2 * 2, track_size.y - 2 * 2);
+    const track_rect = rectfwh(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
+    const track_rect_inner = rectfwh(pos.x + 2, pos.y + knob_size.y / 2 - track_size.y / 2 + 2, track_size.x - 2 * 2, track_size.y - 2 * 2);
 
     const half_width = knob_size.x / 2.0;
 
@@ -351,7 +208,7 @@ fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val)
     const knob_max = pos.x + (track_size.x - knob_size.x);
 
     var knob_x = linmap(slider_val.*, val_min, val_max, knob_min, knob_max);
-    var knob_rect = rectfsep(knob_x, pos.y, knob_size.x, knob_size.y);
+    var knob_rect = rectfwh(knob_x, pos.y, knob_size.x, knob_size.y);
 
     var knob_mid = knob_x + half_width;
 
@@ -379,8 +236,8 @@ fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val)
     knob_x = std.math.clamp(knob_mid - half_width, @as(f32, knob_min), @as(f32, knob_max));
     slider_val.* = linmap(knob_x, knob_min, knob_max, val_min, val_max);
 
-    knob_rect = rectfsep(knob_x, pos.y, knob_size.x, knob_size.y);
-    const knob_rect_inner = rectfsep(knob_x + 5, pos.y + 5, knob_size.x - 5 * 2, knob_size.y - 5 * 2);
+    knob_rect = rectfwh(knob_x, pos.y, knob_size.x, knob_size.y);
+    const knob_rect_inner = rectfwh(knob_x + 5, pos.y + 5, knob_size.x - 5 * 2, knob_size.y - 5 * 2);
 
     renderer.draw_rect(colr3f(0.0, 0.0, 0.0), track_rect);
     renderer.draw_rect(colr3f(0.5, 0.5, 0.5), track_rect_inner);
@@ -405,10 +262,10 @@ pub fn main() anyerror!void {
         turtle_begin();
         defer turtle_end();
 
-        const hrz_0 = turtle_push(.Horizontal, .{});
-        defer turtle_pop(hrz_0);
-        const rct_0 = turtle_push(.Rect, .{ .left = 100, .top = 200, .right = 300, .bottom = 400 });
-        defer turtle_pop(rct_0);
+        turtle_push(.Horizontal, .{});
+        defer turtle_pop();
+        turtle_push(.Rect, .{ .left = 100, .top = 200, .right = 300, .bottom = 400 });
+        defer turtle_pop();
     }
     const display: *Display = XOpenDisplay(0).?;
     defer {
@@ -575,96 +432,6 @@ pub fn main() anyerror!void {
         _ = printf("opengl shading language version = %s\n", opengl_shading_language_version);
     }
 
-    //// Buffers
-    glGenBuffers = init_gl_proc(PFNGLGENBUFFERSPROC, "glGenBuffers");
-    glBindBuffer = init_gl_proc(PFNGLBINDBUFFERPROC, "glBindBuffer");
-    glBufferData = init_gl_proc(PFNGLBUFFERDATAPROC, "glBufferData");
-
-    //// Vertex Arrays and Attributes
-    glVertexAttribPointer = init_gl_proc(PFNGLVERTEXATTRIBPOINTERPROC, "glVertexAttribPointer");
-    glGenVertexArrays = init_gl_proc(PFNGLGENVERTEXARRAYSPROC, "glGenVertexArrays");
-    glBindVertexArray = init_gl_proc(PFNGLBINDVERTEXARRAYPROC, "glBindVertexArray");
-    glEnableVertexAttribArray = init_gl_proc(PFNGLENABLEVERTEXATTRIBARRAYPROC, "glEnableVertexAttribArray");
-    glDisableVertexAttribArray = init_gl_proc(PFNGLDISABLEVERTEXATTRIBARRAYPROC, "glDisableVertexAttribArray");
-
-    //// Uniforms
-    glGetUniformLocation = init_gl_proc(PFNGLGETUNIFORMLOCATIONPROC, "glGetUniformLocation");
-    glUniform2f = init_gl_proc(PFNGLUNIFORM2FPROC, "glUniform2f");
-    glUniform4f = init_gl_proc(PFNGLUNIFORM4FPROC, "glUniform4f");
-    glUniformMatrix4fv = init_gl_proc(PFNGLUNIFORMMATRIX4FVPROC, "glUniformMatrix4fv");
-
-    //// Shader creation
-    glCreateShader = init_gl_proc(PFNGLCREATESHADERPROC, "glCreateShader");
-    glAttachShader = init_gl_proc(PFNGLATTACHSHADERPROC, "glAttachShader");
-    glDetachShader = init_gl_proc(PFNGLDETACHSHADERPROC, "glDetachShader");
-    glDeleteShader = init_gl_proc(PFNGLDELETESHADERPROC, "glDeleteShader");
-    glShaderSource = init_gl_proc(PFNGLSHADERSOURCEPROC, "glShaderSource");
-    glCompileShader = init_gl_proc(PFNGLCOMPILESHADERPROC, "glCompileShader");
-    glGetShaderiv = init_gl_proc(PFNGLGETSHADERIVPROC, "glGetShaderiv");
-    glGetShaderInfoLog = init_gl_proc(PFNGLGETSHADERINFOLOGPROC, "glGetShaderInfoLog");
-
-    //// Program creation
-    glCreateProgram = init_gl_proc(PFNGLCREATEPROGRAMPROC, "glCreateProgram");
-    glLinkProgram = init_gl_proc(PFNGLLINKPROGRAMPROC, "glLinkProgram");
-    glGetProgramiv = init_gl_proc(PFNGLGETPROGRAMIVPROC, "glGetProgramiv");
-    glGetProgramInfoLog = init_gl_proc(PFNGLGETPROGRAMINFOLOGPROC, "glGetProgramInfoLog");
-    glUseProgram = init_gl_proc(PFNGLUSEPROGRAMPROC, "glUseProgram");
-
-    const shader_string_vertex_rect =
-        \\#version 330
-        \\uniform vec4 rect;
-        \\uniform vec2 screen_size;
-        \\void main(){
-        \\ if(gl_VertexID==0)gl_Position.xy=rect.xy;
-        \\ if(gl_VertexID==1)gl_Position.xy=rect.xw;
-        \\ if(gl_VertexID==2)gl_Position.xy=rect.zy;
-        \\ if(gl_VertexID==3)gl_Position.xy=rect.zw;
-        \\ gl_Position.zw=vec2(-1.0,1.0);
-        \\ gl_Position.xy=gl_Position.xy/screen_size*vec2(2.0,-2.0)-vec2(1.0,-1.0);
-        \\}
-        \\
-    ;
-
-    const shader_string_fragment_simple =
-        \\#version 330
-        \\uniform vec4 rect_color;
-        \\out vec3 color;
-        \\void main(){
-        \\ color=rect_color.rgb;
-        \\}
-        \\
-    ;
-
-    const vertex_buffer_data = [_]GLfloat{
-        0.0, 0.0,
-        1.0, 0.0,
-        1.0, 1.0,
-        0.0, 1.0,
-    };
-    {
-        var test_vao: GLuint = undefined;
-        var test_vbuffer: GLuint = undefined;
-
-        glGenVertexArrays.?(1, &test_vao);
-        glBindVertexArray.?(test_vao);
-
-        glGenBuffers.?(1, &test_vbuffer);
-        glBindBuffer.?(GL_ARRAY_BUFFER, test_vbuffer);
-        glBufferData.?(GL_ARRAY_BUFFER, @sizeOf(@TypeOf(vertex_buffer_data)), &vertex_buffer_data[0], GL_STATIC_DRAW);
-    }
-
-    _program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
-    _program_rect_uniform_location_rect = glGetUniformLocation.?(_program_rect, "rect");
-    _program_rect_uniform_location_rect_color = glGetUniformLocation.?(_program_rect, "rect_color");
-    _program_rect_uniform_location_screen_size = glGetUniformLocation.?(_program_rect, "screen_size");
-
-    glEnable(GL_DEPTH_TEST);
-    //glEnable(GL_CULL_FACE);
-    glEnable(GL_MULTISAMPLE);
-
-    //glCullFace(GL_BACK);
-    glDepthFunc(GL_LEQUAL);
-
     var xres: c_int = 0;
     var window_attributes: XWindowAttributes = undefined;
     xres = XGetWindowAttributes(display, window, &window_attributes);
@@ -679,12 +446,7 @@ pub fn main() anyerror!void {
     assert(clock_gettime(mono_clock, &game_start_timespec) == 0);
     var frame_start_time = timespecToNanosec(&game_start_timespec);
 
-    var renderer = Renderer{
-        .display_rect = Rectf{
-            .tl = Vector2f{ .x = 0.0, .y = 0.0 },
-            .br = Vector2f{ .x = @intToFloat(f32, display_width), .y = @intToFloat(f32, display_height) },
-        },
-    };
+    var renderer = Renderer{ .display_rect = recfwh(@intToFloat(f32, display_width), @intToFloat(f32, display_height)) };
 
     var colour_select_hue: f32 = 200.0;
     var colour_select_saturation: f32 = 60.0;
@@ -763,10 +525,7 @@ pub fn main() anyerror!void {
         if (should_quit) break :game_loop;
         if (display_size_changed) {
             glViewport(0, 0, display_width, display_height);
-            renderer.display_rect = Rectf{
-                .tl = Vector2f{ .x = 0.0, .y = 0.0 },
-                .br = Vector2f{ .x = @intToFloat(f32, display_width), .y = @intToFloat(f32, display_height) },
-            };
+            renderer.display_rect = recfwh(@intToFloat(f32, display_width), @intToFloat(f32, display_height));
         }
 
         {

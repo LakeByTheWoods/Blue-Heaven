@@ -21,10 +21,6 @@ const TurtleStyle = struct {
     previous_style: ?*Turtle,
 };
 
-//#define TURTLE(TYPE, ...) \
-//    for (*Turtle CAT_LINE(turtle__once) = (*Turtle)1, CAT_LINE(turtle__handle__) __attribute__(( cleanup(turtle_pop) )) = turtle_push(TURTLE_TYPE_ ## TYPE, &(union Turtle_Data){ __VA_ARGS__ }) ; \
-//         ({ (void)CAT_LINE(turtle__handle__); CAT_LINE(turtle__once); }); CAT_LINE(turtle__once) = 0)
-
 const TurtleLayout = struct {
     previous_layout: *Turtle,
     rect: TurtleRect,
@@ -41,6 +37,9 @@ const max_turtles = 16 * 1024;
 
 var turtle_tower: [max_turtles]Turtle = [_]Turtle{undefined} ** max_turtles;
 var turtle_tower_top: usize = 0;
+
+var turtle_stack: [max_turtles]usize = [_]usize{undefined} ** max_turtles;
+var turtle_stack_top: usize = 0;
 
 var turtle_default_style: Turtle = Turtle{ .Style = TurtleStyle{ .previous_style = null } };
 var turtle_default_layout: Turtle = Turtle{ .Horizontal = TurtleLayout{ .previous_layout = undefined, .rect = TurtleRect{} } };
@@ -93,8 +92,12 @@ pub fn turtle_end() void {
     turtle_tower_top = 0;
 }
 
-pub fn turtle_push(turtle_type: TurtleType, data: TurtleRect) *Turtle {
+pub fn turtle_push(turtle_type: TurtleType, data: TurtleRect) void {
     var t: *Turtle = &turtle_tower[turtle_tower_top];
+
+    turtle_stack_top += 1;
+    turtle_stack[turtle_stack_top] = turtle_tower_top;
+
     turtle_tower_top += 1;
     assert(turtle_tower_top < max_turtles); // Too many turtles
 
@@ -175,10 +178,12 @@ pub fn turtle_push(turtle_type: TurtleType, data: TurtleRect) *Turtle {
             }
         },
     }
-    return t;
 }
 
-pub fn turtle_pop(t: *Turtle) void {
+pub fn turtle_pop() void {
+    const t: *Turtle = &turtle_tower[turtle_stack[turtle_stack_top - 1]];
+    turtle_stack_top -= 1;
+
     switch (t.*) {
         .Horizontal, .Vertical => |layout| {
             turtle_current_layout = layout.previous_layout;
@@ -186,7 +191,9 @@ pub fn turtle_pop(t: *Turtle) void {
 
         .Style => |style| {
             if (style.previous_style) |previous_style| {
-                const return_to_old = turtle_push(.Style, .{});
+                turtle_push(.Style, .{});
+                const return_to_old = &turtle_tower[turtle_stack[turtle_stack_top - 1]];
+                turtle_stack_top -= 1; // We don't want a matching pop for the above push
                 return_to_old.* = previous_style.*;
             }
         },

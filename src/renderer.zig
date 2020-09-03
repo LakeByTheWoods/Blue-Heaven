@@ -1,4 +1,17 @@
-fn initGLProc(comptime T: type, name: [:0]const u8) T {
+const std = @import("std");
+const assert = std.debug.assert;
+usingnamespace @import("lmath.zig");
+
+usingnamespace @cImport({
+    @cInclude("X11/Xlib.h");
+    @cInclude("GL/gl.h");
+    @cInclude("GL/glx.h");
+    @cInclude("GL/glext.h");
+
+    @cInclude("simple_font.h");
+});
+
+fn glInitProc(comptime T: type, name: [:0]const u8) T {
     return @ptrCast(T, glXGetProcAddressARB(@ptrCast(*const GLubyte, &name[0])));
 }
 
@@ -91,7 +104,7 @@ fn _renderer_build_one_off_program(shader_string_vertex: [:0]const u8, shader_st
     return program;
 }
 
-const Renderer = struct {
+pub const Renderer = struct {
     pub fn init(display_rect: Rectf) Renderer {
 
         //// Buffers
@@ -129,7 +142,7 @@ const Renderer = struct {
         glGetProgramInfoLog = glInitProc(PFNGLGETPROGRAMINFOLOGPROC, "glGetProgramInfoLog");
         glUseProgram = glInitProc(PFNGLUSEPROGRAMPROC, "glUseProgram");
 
-        const shader_string_vertex_rect = @embedFile("../shaders/rect.vert");
+        const shader_string_vertex_rect = @embedFile("../shaders/rectangle.vert");
         const shader_string_fragment_simple = @embedFile("../shaders/simple.frag");
 
         const vertex_buffer_data = [_]GLfloat{
@@ -150,10 +163,10 @@ const Renderer = struct {
             glBufferData.?(GL_ARRAY_BUFFER, @sizeOf(@TypeOf(vertex_buffer_data)), &vertex_buffer_data[0], GL_STATIC_DRAW);
         }
 
-        _program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
-        _program_rect_uniform_location_rect = glGetUniformLocation.?(_program_rect, "rect");
-        _program_rect_uniform_location_rect_color = glGetUniformLocation.?(_program_rect, "rect_color");
-        _program_rect_uniform_location_screen_size = glGetUniformLocation.?(_program_rect, "screen_size");
+        const program_rect = _renderer_build_one_off_program(shader_string_vertex_rect, shader_string_fragment_simple);
+        const program_rect_uniform_location_rect = glGetUniformLocation.?(program_rect, "rect");
+        const program_rect_uniform_location_rect_color = glGetUniformLocation.?(program_rect, "rect_color");
+        const program_rect_uniform_location_screen_size = glGetUniformLocation.?(program_rect, "screen_size");
 
         glEnable(GL_DEPTH_TEST);
         //glEnable(GL_CULL_FACE);
@@ -162,18 +175,25 @@ const Renderer = struct {
         //glCullFace(GL_BACK);
         glDepthFunc(GL_LEQUAL);
 
-        Renderer{ .display_rect = display_rect };
+        return Renderer{
+            .display_rect = display_rect,
+
+            ._program_rect = program_rect,
+            ._program_rect_uniform_location_rect = program_rect_uniform_location_rect,
+            ._program_rect_uniform_location_rect_color = program_rect_uniform_location_rect_color,
+            ._program_rect_uniform_location_screen_size = program_rect_uniform_location_screen_size,
+        };
     }
 
-    fn draw_rect(renderer: *Renderer, color: Color3f, rect: Rectf) void {
-        glUseProgram.?(_program_rect);
-        glUniform4f.?(_program_rect_uniform_location_rect, rect.tl.x, rect.tl.y, rect.br.x, rect.br.y);
-        glUniform4f.?(_program_rect_uniform_location_rect_color, color.r, color.g, color.b, 1.0);
-        glUniform2f.?(_program_rect_uniform_location_screen_size, renderer.display_rect.width(), renderer.display_rect.height());
+    pub fn draw_rect(self: *Renderer, color: Color3f, rect: Rectf) void {
+        glUseProgram.?(self._program_rect);
+        glUniform4f.?(self._program_rect_uniform_location_rect, rect.tl.x, rect.tl.y, rect.br.x, rect.br.y);
+        glUniform4f.?(self._program_rect_uniform_location_rect_color, color.r, color.g, color.b, 1.0);
+        glUniform2f.?(self._program_rect_uniform_location_screen_size, self.display_rect.width(), self.display_rect.height());
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 
-    fn draw_simple_font_char(renderer: *Renderer, c: u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
+    pub fn draw_simple_font_char(self: *Renderer, c: u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
         var y: f32 = left_baseline.y - 12.0 * size;
 
         var j: u8 = 0;
@@ -184,14 +204,14 @@ const Renderer = struct {
             while (i < 8) : (i += 1) {
                 const x = left_baseline.x + 8.0 * size - @intToFloat(f32, i) * size;
                 if (bits & (@as(u8, 1) << @intCast(u3, i)) != 0) {
-                    renderer.draw_rect(fg_color, Rectf{ .tl = Vector2f{ .x = x, .y = y }, .br = Vector2f{ .x = x + size, .y = y + size } });
+                    self.draw_rect(fg_color, Rectf{ .tl = Vector2f{ .x = x, .y = y }, .br = Vector2f{ .x = x + size, .y = y + size } });
                 }
             }
             y += size;
         }
     }
 
-    fn draw_simple_font_text(renderer: *Renderer, txt: []const u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
+    pub fn draw_simple_font_text(self: *Renderer, txt: []const u8, fg_color: Color3f, bg_color: Color3f, left_baseline: Vector2f, size: f32) void {
         var c_left_baseline = left_baseline;
         for (txt) |c| {
             switch (c) {
@@ -200,7 +220,7 @@ const Renderer = struct {
                     c_left_baseline.y += 16 * size;
                 },
                 else => {
-                    renderer.draw_simple_font_char(c, fg_color, bg_color, c_left_baseline, size);
+                    self.draw_simple_font_char(c, fg_color, bg_color, c_left_baseline, size);
                     c_left_baseline.x += 8 * size;
                 },
             }

@@ -3,7 +3,9 @@ const ascii = @import("std").ascii;
 const assert = @import("std").debug.assert;
 const hsluv = @import("hsluv");
 
+usingnamespace @import("renderer.zig");
 usingnamespace @import("turtle.zig");
+usingnamespace @import("lmath.zig");
 
 usingnamespace @cImport({
     @cInclude("stdio.h");
@@ -41,7 +43,7 @@ fn xErrorHandler(display: ?*Display, event: [*c]XErrorEvent) callconv(.C) c_int 
     return 0;
 }
 
-fn opaquePtrCast(comptime To: type, from: var) To {
+fn opaquePtrCast(comptime To: type, from: anytype) To {
     return @ptrCast(To, @alignCast(@alignOf(To.Child), from));
 }
 
@@ -67,137 +69,7 @@ fn isExtensionSupported(glx_extensions: [*:0]const u8, extension: []const u8) bo
     return false;
 }
 
-const Color3f = packed struct {
-    r: f32 = 0.0,
-    g: f32 = 0.0,
-    b: f32 = 0.0,
-};
-
-fn colr3f(r: f32, g: f32, b: f32) Color3f {
-    return Color3f{ .r = r, .g = g, .b = b };
-}
-
-const palette = struct {
-    const blue_heaven = hexToColr3f(0x0075b3);
-    const raspberry = hexToColr3f(0xff5a5f);
-
-    const honeycomb = hexToColr3f(0xefa00b);
-
-    const shadow = hexToColr3f(0x3c3c3c);
-    const ice_cream = hexToColr3f(0xf5f5f5);
-};
-
-pub fn hexToColr3f(hex: u24) Color3f {
-    return Color3f{
-        .r = @intToFloat(f32, (hex & 0xFF0000) >> 16) / 255.0,
-        .g = @intToFloat(f32, (hex & 0xFF00) >> 8) / 255.0,
-        .b = @intToFloat(f32, (hex & 0xFF) >> 0) / 255.0,
-    };
-}
-
-const Vector2f = packed struct {
-    x: f32 = 0.0,
-    y: f32 = 0.0,
-
-    pub fn add(self: *Vector2f, other: Vector2f) void {
-        self.*.x += other.x;
-        self.*.y += other.y;
-    }
-};
-
-fn v2f(x: f32, y: f32) Vector2f {
-    return Vector2f{ .x = x, .y = y };
-}
-
-fn v2fAdd(a: Vector2f, b: Vector2f) Vector2f {
-    return Vector2f{ .x = a.x + b.x, .y = a.y + b.y };
-}
-
-const Vector3f = packed struct {
-    x: f32 = 0.0,
-    y: f32 = 0.0,
-    z: f32 = 0.0,
-};
-
-fn v3f(x: f32, y: f32, z: f32) Vector2f {
-    return Vector3f{ .x = x, .y = y, .z = z };
-}
-
-const Rectf = struct {
-    tl: Vector2f,
-    br: Vector2f,
-
-    pub fn width(self: *Rectf) f32 {
-        return (self.br.x - self.tl.x);
-    }
-
-    pub fn height(self: *Rectf) f32 {
-        return (self.br.y - self.tl.y);
-    }
-};
-
-pub fn rectf(pos: Vector2f, size: Vector2f) Rectf {
-    return Rectf{ .tl = pos, .br = v2f(pos.x + size.x, pos.y + size.y) };
-}
-
-pub fn rectfwh(pos_x: f32, pos_y: f32, size_x: f32, size_y: f32) Rectf {
-    return Rectf{ .tl = v2f(pos_x, pos_y), .br = v2f(pos_x + size_x, pos_y + size_y) };
-}
-
-pub fn collision_rectf_v2f(rect: Rectf, v: Vector2f) bool {
-    return (v.x > rect.tl.x and v.x < rect.br.x and v.y > rect.tl.y and v.y < rect.br.y);
-}
-
-fn lerp(t: var, a: var, b: @TypeOf(a)) @TypeOf(a) {
-    // TODO: Could be replaced with FMA when available
-    const T = @TypeOf(t);
-    const A = @TypeOf(a);
-    std.debug.assert(@typeInfo(T) == .Float);
-    switch (@typeInfo(@TypeOf(a))) {
-        .ComptimeInt,
-        .Int,
-        => {
-            return @floatToInt(A, (1.0 - t) * @intToFloat(T, a) + t * @intToFloat(T, b));
-        },
-        .Float => {
-            return (1.0 - t) * a + t * b;
-        },
-        else => unreachable,
-    }
-}
-
-fn unlerp(comptime ReturnType: type, v: var, a: @TypeOf(v), b: @TypeOf(v)) ReturnType {
-    std.debug.assert(@typeInfo(ReturnType) == .Float);
-
-    switch (@typeInfo(@TypeOf(v))) {
-        .ComptimeInt,
-        .Int,
-        => {
-            return ((v - @intToFloat(ReturnType, a)) / @intToFloat(ReturnType, b - a));
-        },
-        .Float => {
-            std.debug.assert(ReturnType == @TypeOf(v));
-            return (v - a) / (b - a);
-        },
-        else => unreachable,
-    }
-}
-
-fn linmap(v: var, a: @TypeOf(v), b: @TypeOf(v), c: @TypeOf(v), d: @TypeOf(v)) @TypeOf(v) {
-    switch (@typeInfo(@TypeOf(v))) {
-        .ComptimeInt,
-        .Int,
-        => {
-            return lerp(unlerp(f64, v, a, b), c, d);
-        },
-        .Float => {
-            return lerp(unlerp(@TypeOf(v), v, a, b), c, d);
-        },
-        else => unreachable,
-    }
-}
-
-fn drawSlider(renderer: *Renderer, slider_val: var, val_min: @TypeOf(slider_val).Child, val_max: @TypeOf(slider_val).Child, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
+fn drawSlider(renderer: *Renderer, slider_val: anytype, val_min: @TypeOf(slider_val).Child, val_max: @TypeOf(slider_val).Child, pos: Vector2f, knob_size: Vector2f, track_size: Vector2f, grabbed: *bool, mouse: *MouseState) void {
     assert(@typeInfo(@TypeOf(slider_val)) == .Pointer);
     const track_rect = rectfwh(pos.x, pos.y + knob_size.y / 2 - track_size.y / 2, track_size.x, track_size.y);
     const track_rect_inner = rectfwh(pos.x + 2, pos.y + knob_size.y / 2 - track_size.y / 2 + 2, track_size.x - 2 * 2, track_size.y - 2 * 2);
@@ -285,7 +157,8 @@ pub fn main() anyerror!void {
         std.debug.warn("GLX Version minor = {}\n", .{glx_minor});
     }
 
-    var default_screen = DefaultScreen(display);
+    //var default_screen = DefaultScreen(display);
+    var default_screen = (@import("std").meta.cast(_XPrivDisplay, display)).*.default_screen;
     const fb_config: GLXFBConfig = blk: {
         const visual_attributes = [_]GLint{
             GLX_X_RENDERABLE,  True,
@@ -446,7 +319,7 @@ pub fn main() anyerror!void {
     assert(clock_gettime(mono_clock, &game_start_timespec) == 0);
     var frame_start_time = timespecToNanosec(&game_start_timespec);
 
-    var renderer = Renderer{ .display_rect = recfwh(@intToFloat(f32, display_width), @intToFloat(f32, display_height)) };
+    var renderer = Renderer.init(rectfwh(0, 0, @intToFloat(f32, display_width), @intToFloat(f32, display_height)));
 
     var colour_select_hue: f32 = 200.0;
     var colour_select_saturation: f32 = 60.0;
@@ -525,7 +398,7 @@ pub fn main() anyerror!void {
         if (should_quit) break :game_loop;
         if (display_size_changed) {
             glViewport(0, 0, display_width, display_height);
-            renderer.display_rect = recfwh(@intToFloat(f32, display_width), @intToFloat(f32, display_height));
+            renderer.display_rect = rectfwh(0, 0, @intToFloat(f32, display_width), @intToFloat(f32, display_height));
         }
 
         {

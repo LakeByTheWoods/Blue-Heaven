@@ -1,0 +1,3 @@
+[submodule "hsluv-zig"]
+	path = hsluv-zig
+	url = https://github.com/LakeByTheWoods/hsluv-zig.git
